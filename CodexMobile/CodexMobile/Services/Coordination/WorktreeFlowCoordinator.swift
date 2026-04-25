@@ -292,7 +292,7 @@ enum WorktreeFlowCoordinator {
         return matchingLiveThread(
             in: codex.threads,
             projectPath: resolvedProjectPath,
-            sort: codex.sortThreads
+            codex: codex
         )
     }
 
@@ -705,14 +705,14 @@ private extension WorktreeFlowCoordinator {
     static func matchingLiveThread(
         in threads: [CodexThread],
         projectPath: String,
-        sort: @MainActor ([CodexThread]) -> [CodexThread]
+        codex: CodexService
     ) -> CodexThread? {
         let matchingLiveThreads = threads.filter { thread in
             thread.syncState == .live
                 && comparableProjectPath(thread.normalizedProjectPath) == projectPath
         }
 
-        return sort(matchingLiveThreads).first
+        return codex.sortThreads(matchingLiveThreads).first
     }
 
     static func normalizedForkProjectPath(_ rawPath: String?) -> String? {
