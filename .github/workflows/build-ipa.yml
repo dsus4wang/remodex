@@ -1,0 +1,60 @@
+name: Build iOS IPA (unsigned)
+
+# Produces an unsigned IPA ready to be re-signed locally with a tool such as
+# 全能签 using an enterprise certificate – no Apple Developer credentials needed
+# in CI.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-latest
+
+    env:
+      PROJECT_PATH: CodexMobile/CodexMobile.xcodeproj
+      SCHEME: CodexMobile
+      ARCHIVE_PATH: /tmp/CodexMobile.xcarchive
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Archive without code signing ─────────────────────────────────────────
+      - name: Archive (no signing)
+        run: |
+          xcodebuild \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$ARCHIVE_PATH" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            archive
+
+      # ── Package .app → unsigned IPA ──────────────────────────────────────────
+      # xcodebuild -exportArchive requires a real signing identity, so we
+      # manually zip the .app bundle into the standard IPA Payload layout.
+      - name: Package unsigned IPA
+        run: |
+          APP=$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -name "*.app" | head -1)
+          mkdir -p /tmp/Payload
+          cp -R "$APP" /tmp/Payload/
+          cd /tmp
+          zip -qr "CodexMobile-unsigned.ipa" Payload/
+          echo "IPA_PATH=/tmp/CodexMobile-unsigned.ipa" >> "$GITHUB_ENV"
+
+      # ── Upload artifact ───────────────────────────────────────────────────────
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodexMobile-unsigned-${{ github.ref_name }}-${{ github.run_number }}
+          path: /tmp/CodexMobile-unsigned.ipa
+          retention-days: 14
