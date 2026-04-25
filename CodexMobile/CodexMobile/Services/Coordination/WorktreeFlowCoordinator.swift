@@ -50,7 +50,7 @@ enum WorktreeFlowCoordinator {
             preferredProjectPath,
             message: "A valid local project path is required."
         )
-        let gitService = GitActionsService(codex: codex, workingDirectory: normalizedPreferredProjectPath)
+        let gitService = await GitActionsService(codex: codex, workingDirectory: normalizedPreferredProjectPath)
         let branches = try await gitService.branchesWithStatus()
         let baseBranch = branches.defaultBranch?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !baseBranch.isEmpty else {
@@ -116,7 +116,7 @@ enum WorktreeFlowCoordinator {
             )
         }
 
-        let gitService = GitActionsService(codex: codex, workingDirectory: normalizedSourceProjectPath)
+        let gitService = await GitActionsService(codex: codex, workingDirectory: normalizedSourceProjectPath)
         let result = try await gitService.createManagedWorktree(
             baseBranch: baseBranch,
             changeTransfer: .move
@@ -148,7 +148,7 @@ enum WorktreeFlowCoordinator {
             message: "The current handoff source is not available on this Mac."
         )
 
-        let gitService = GitActionsService(codex: codex, workingDirectory: sourceProjectPath)
+        let gitService = await GitActionsService(codex: codex, workingDirectory: sourceProjectPath)
         var localCheckoutPath: String?
         var didTransferTrackedChanges = false
 
@@ -244,7 +244,7 @@ enum WorktreeFlowCoordinator {
             )
         }
 
-        let gitService = GitActionsService(codex: codex, workingDirectory: normalizedSourceProjectPath)
+        let gitService = await GitActionsService(codex: codex, workingDirectory: normalizedSourceProjectPath)
         let result = try await gitService.createManagedWorktree(
             baseBranch: trimmedBaseBranch,
             changeTransfer: .none
@@ -273,6 +273,7 @@ enum WorktreeFlowCoordinator {
     }
 
     // Prefers reopening the live thread already bound to a checked-out worktree instead of spawning another chat.
+    @MainActor
     static func liveThreadForCheckedOutElsewhereBranch(
         projectPath: String,
         codex: CodexService,
@@ -291,7 +292,7 @@ enum WorktreeFlowCoordinator {
         return matchingLiveThread(
             in: codex.threads,
             projectPath: resolvedProjectPath,
-            sort: codex.sortThreads
+            codex: codex
         )
     }
 
@@ -328,7 +329,7 @@ private extension WorktreeFlowCoordinator {
 
         do {
             if transferTrackedChangesFromSource {
-                let gitService = GitActionsService(codex: codex, workingDirectory: sourceProjectPath)
+                let gitService = await GitActionsService(codex: codex, workingDirectory: sourceProjectPath)
                 let transferResult = try await gitService.transferManagedHandoff(
                     targetProjectPath: resolvedProjectPath
                 )
@@ -349,7 +350,9 @@ private extension WorktreeFlowCoordinator {
             )
         } catch {
             if isMissingManagedWorktreeTargetError(error) {
-                codex.rememberAssociatedManagedWorktreePath(nil, for: threadID)
+                await MainActor.run {
+                    codex.rememberAssociatedManagedWorktreePath(nil, for: threadID)
+                }
                 if didTransferTrackedChanges {
                     let recoveryDetail = await recoverFailedThreadRebind(
                         didTransferTrackedChanges: didTransferTrackedChanges,
@@ -386,6 +389,7 @@ private extension WorktreeFlowCoordinator {
         }
     }
 
+    @MainActor
     static func awaitPreparedWorktreeForkReadiness(codex: CodexService) async throws {
         for (index, delay) in forkReadinessRetryDelays.enumerated() {
             if delay > 0 {
@@ -426,7 +430,7 @@ private extension WorktreeFlowCoordinator {
                 return notices.joined(separator: "\n\n")
             }
 
-            let rollbackService = GitActionsService(codex: codex, workingDirectory: reboundProjectPath)
+            let rollbackService = await GitActionsService(codex: codex, workingDirectory: reboundProjectPath)
             do {
                 _ = try await rollbackService.transferManagedHandoff(targetProjectPath: sourceProjectPath)
             } catch {
@@ -438,7 +442,7 @@ private extension WorktreeFlowCoordinator {
         if cleanupManagedWorktreeOnFailedRebind,
            canSafelyCleanupManagedWorktree,
            let reboundProjectPath {
-            let cleanupService = GitActionsService(codex: codex, workingDirectory: reboundProjectPath)
+            let cleanupService = await GitActionsService(codex: codex, workingDirectory: reboundProjectPath)
             do {
                 try await cleanupService.removeManagedWorktree(branch: nil)
             } catch {
@@ -466,7 +470,7 @@ private extension WorktreeFlowCoordinator {
                 return .notNeeded
             }
 
-            let cleanupService = GitActionsService(codex: codex, workingDirectory: result.worktreePath)
+            let cleanupService = await GitActionsService(codex: codex, workingDirectory: result.worktreePath)
             do {
                 try await cleanupService.removeManagedWorktree(branch: nil)
                 return .removed
@@ -545,7 +549,7 @@ private extension WorktreeFlowCoordinator {
                 return .notNeeded
             }
 
-            let cleanupService = GitActionsService(codex: codex, workingDirectory: result.worktreePath)
+            let cleanupService = await GitActionsService(codex: codex, workingDirectory: result.worktreePath)
             do {
                 try await cleanupService.removeManagedWorktree(branch: nil)
                 return .removed
@@ -565,7 +569,7 @@ private extension WorktreeFlowCoordinator {
             return .notNeeded
         }
 
-        let cleanupService = GitActionsService(codex: codex, workingDirectory: result.worktreePath)
+        let cleanupService = await GitActionsService(codex: codex, workingDirectory: result.worktreePath)
         do {
             try await cleanupService.removeManagedWorktree(branch: nil)
             return .removed
@@ -697,17 +701,18 @@ private extension WorktreeFlowCoordinator {
         return canonicalProjectPath(rawPath) ?? CodexThreadStartProjectBinding.normalizedProjectPath(rawPath)
     }
 
+    @MainActor
     static func matchingLiveThread(
         in threads: [CodexThread],
         projectPath: String,
-        sort: ([CodexThread]) -> [CodexThread]
+        codex: CodexService
     ) -> CodexThread? {
         let matchingLiveThreads = threads.filter { thread in
             thread.syncState == .live
                 && comparableProjectPath(thread.normalizedProjectPath) == projectPath
         }
 
-        return sort(matchingLiveThreads).first
+        return codex.sortThreads(matchingLiveThreads).first
     }
 
     static func normalizedForkProjectPath(_ rawPath: String?) -> String? {
