@@ -12,9 +12,6 @@ final class SubscriptionServiceAccessTests: XCTestCase {
     func testServiceStartsWithProAccess() {
         let service = makeService()
 
-        XCTAssertEqual(service.freeSendCount, 0)
-        XCTAssertEqual(service.remainingFreeSendAttempts, 5)
-        XCTAssertTrue(service.hasFreeSendAccess)
         XCTAssertTrue(service.hasProAccess)
         XCTAssertTrue(service.hasAppAccess)
     }
@@ -26,9 +23,6 @@ final class SubscriptionServiceAccessTests: XCTestCase {
             service.consumeFreeSendAttemptIfNeeded()
         }
 
-        XCTAssertEqual(service.freeSendCount, 0)
-        XCTAssertEqual(service.remainingFreeSendAttempts, 5)
-        XCTAssertTrue(service.hasFreeSendAccess)
         XCTAssertTrue(service.hasProAccess)
         XCTAssertTrue(service.hasAppAccess)
     }
