@@ -23,6 +23,7 @@ final class SubscriptionServiceAccessTests: XCTestCase {
             service.consumeFreeSendAttemptIfNeeded()
         }
 
+        XCTAssertEqual(service.freeSendCount, 0)
         XCTAssertTrue(service.hasProAccess)
         XCTAssertTrue(service.hasAppAccess)
     }
