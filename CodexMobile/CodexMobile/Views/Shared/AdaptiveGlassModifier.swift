@@ -14,20 +14,12 @@ enum GlassPreference {
 // MARK: - Glass effect modifier
 
 private struct AdaptiveGlassModifier<S: Shape>: ViewModifier {
-    @AppStorage(GlassPreference.storageKey) private var glassEnabled = true
     let regularStyle: Bool
     let shape: S
 
     func body(content: Content) -> some View {
-        if #available(iOS 26, *), glassEnabled {
-            if regularStyle {
-                content.glassEffect(.regular, in: shape)
-            } else {
-                content.glassEffect(in: shape)
-            }
-        } else {
-            content.background(.thinMaterial, in: shape)
-        }
+        let _ = regularStyle
+        content.background(.thinMaterial, in: shape)
     }
 }
 

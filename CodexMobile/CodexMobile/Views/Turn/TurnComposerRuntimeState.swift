@@ -29,6 +29,7 @@ struct TurnComposerRuntimeState {
         selectedServiceTier == serviceTier
     }
 
+    @MainActor
     static func resolve(
         codex: CodexService,
         reasoningDisplayOptions: [TurnComposerReasoningDisplayOption]
