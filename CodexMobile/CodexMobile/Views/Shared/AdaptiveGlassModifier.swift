@@ -14,11 +14,9 @@ enum GlassPreference {
 // MARK: - Glass effect modifier
 
 private struct AdaptiveGlassModifier<S: Shape>: ViewModifier {
-    let regularStyle: Bool
     let shape: S
 
     func body(content: Content) -> some View {
-        let _ = regularStyle
         content.background(.thinMaterial, in: shape)
     }
 }
@@ -60,11 +58,12 @@ enum AdaptiveGlassStyle {
 
 extension View {
     func adaptiveGlass(_ style: AdaptiveGlassStyle, in shape: some Shape) -> some View {
-        modifier(AdaptiveGlassModifier(regularStyle: true, shape: shape))
+        let _ = style
+        return modifier(AdaptiveGlassModifier(shape: shape))
     }
 
     func adaptiveGlass(in shape: some Shape) -> some View {
-        modifier(AdaptiveGlassModifier(regularStyle: false, shape: shape))
+        modifier(AdaptiveGlassModifier(shape: shape))
     }
 
     func adaptiveNavigationBar() -> some View {
