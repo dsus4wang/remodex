@@ -58,7 +58,7 @@ enum AdaptiveGlassStyle {
 
 extension View {
     func adaptiveGlass(_: AdaptiveGlassStyle, in shape: some Shape) -> some View {
-        return modifier(AdaptiveGlassModifier(shape: shape))
+        modifier(AdaptiveGlassModifier(shape: shape))
     }
 
     func adaptiveGlass(in shape: some Shape) -> some View {
