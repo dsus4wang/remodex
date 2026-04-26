@@ -14,20 +14,10 @@ enum GlassPreference {
 // MARK: - Glass effect modifier
 
 private struct AdaptiveGlassModifier<S: Shape>: ViewModifier {
-    @AppStorage(GlassPreference.storageKey) private var glassEnabled = true
-    let regularStyle: Bool
     let shape: S
 
     func body(content: Content) -> some View {
-        if #available(iOS 26, *), glassEnabled {
-            if regularStyle {
-                content.glassEffect(.regular, in: shape)
-            } else {
-                content.glassEffect(in: shape)
-            }
-        } else {
-            content.background(.thinMaterial, in: shape)
-        }
+        content.background(.thinMaterial, in: shape)
     }
 }
 
@@ -67,12 +57,12 @@ enum AdaptiveGlassStyle {
 }
 
 extension View {
-    func adaptiveGlass(_ style: AdaptiveGlassStyle, in shape: some Shape) -> some View {
-        modifier(AdaptiveGlassModifier(regularStyle: true, shape: shape))
+    func adaptiveGlass(_: AdaptiveGlassStyle, in shape: some Shape) -> some View {
+        modifier(AdaptiveGlassModifier(shape: shape))
     }
 
     func adaptiveGlass(in shape: some Shape) -> some View {
-        modifier(AdaptiveGlassModifier(regularStyle: false, shape: shape))
+        modifier(AdaptiveGlassModifier(shape: shape))
     }
 
     func adaptiveNavigationBar() -> some View {
