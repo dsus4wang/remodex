@@ -82,7 +82,7 @@ final class SubscriptionService {
     private(set) var customerInfo: CustomerInfo?
     private(set) var currentOffering: Offering?
     private(set) var packageOptions: [SubscriptionPackageOption] = []
-    private(set) var hasProAccess = false
+    private(set) var hasProAccess = true
     private(set) var freeSendCount = 0
     private(set) var latestPurchaseDate: Date?
     private(set) var willRenew = false
@@ -110,9 +110,7 @@ final class SubscriptionService {
         freeSendCount < Self.freeSendLimit
     }
 
-    var hasAppAccess: Bool {
-        hasProAccess || hasFreeSendAccess
-    }
+    var hasAppAccess: Bool { true }
 
     // Counts a valid send attempt for free users even if the turn later fails.
     func consumeFreeSendAttemptIfNeeded() {
@@ -302,7 +300,7 @@ private extension SubscriptionService {
     func applyCustomerInfo(_ info: CustomerInfo) {
         customerInfo = info
         let entitlement = info.entitlements.all[AppEnvironment.revenueCatEntitlementName]
-        hasProAccess = entitlement?.isActive == true
+        hasProAccess = true
         hasCachedOptimisticAccess = hasProAccess
         latestPurchaseDate = entitlement?.latestPurchaseDate
         willRenew = entitlement?.willRenew == true
@@ -319,12 +317,12 @@ private extension SubscriptionService {
             return
         }
 
-        hasProAccess = cachedState.hasProAccess
-        hasCachedOptimisticAccess = cachedState.hasProAccess
+        hasProAccess = true
+        hasCachedOptimisticAccess = true
         latestPurchaseDate = cachedState.latestPurchaseDate
         willRenew = cachedState.willRenew
         managementURL = cachedState.managementURLString.flatMap(URL.init(string:))
-        bootstrapState = cachedState.hasProAccess ? .ready : .idle
+        bootstrapState = .ready
     }
 
     func persistCachedState() {
