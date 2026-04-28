@@ -76,13 +76,13 @@ final class SubscriptionService {
     // Keep the task handle nonisolated so `deinit` can cancel it under Swift 6 isolation rules.
     nonisolated(unsafe) private var customerInfoUpdatesTask: Task<Void, Never>?
     private var isBootstrapping = false
-    private var hasCachedOptimisticAccess = false
+    private var hasCachedOptimisticAccess = true
 
     private(set) var bootstrapState: SubscriptionBootstrapState = .idle
     private(set) var customerInfo: CustomerInfo?
     private(set) var currentOffering: Offering?
     private(set) var packageOptions: [SubscriptionPackageOption] = []
-    private(set) var hasProAccess = false
+    var hasProAccess: Bool { true }
     private(set) var freeSendCount = 0
     private(set) var latestPurchaseDate: Date?
     private(set) var willRenew = false
@@ -110,19 +110,10 @@ final class SubscriptionService {
         freeSendCount < Self.freeSendLimit
     }
 
-    var hasAppAccess: Bool {
-        hasProAccess || hasFreeSendAccess
-    }
+    var hasAppAccess: Bool { true }
 
     // Counts a valid send attempt for free users even if the turn later fails.
-    func consumeFreeSendAttemptIfNeeded() {
-        guard !hasProAccess, freeSendCount < Self.freeSendLimit else {
-            return
-        }
-
-        freeSendCount += 1
-        defaults.set(freeSendCount, forKey: Self.freeSendCountDefaultsKey)
-    }
+    func consumeFreeSendAttemptIfNeeded() {}
 
     // Bootstraps subscription state once at launch or from the recovery retry action.
     func bootstrap() async {
@@ -302,8 +293,7 @@ private extension SubscriptionService {
     func applyCustomerInfo(_ info: CustomerInfo) {
         customerInfo = info
         let entitlement = info.entitlements.all[AppEnvironment.revenueCatEntitlementName]
-        hasProAccess = entitlement?.isActive == true
-        hasCachedOptimisticAccess = hasProAccess
+        hasCachedOptimisticAccess = true
         latestPurchaseDate = entitlement?.latestPurchaseDate
         willRenew = entitlement?.willRenew == true
         managementURL = info.managementURL
@@ -319,12 +309,11 @@ private extension SubscriptionService {
             return
         }
 
-        hasProAccess = cachedState.hasProAccess
-        hasCachedOptimisticAccess = cachedState.hasProAccess
+        hasCachedOptimisticAccess = true
         latestPurchaseDate = cachedState.latestPurchaseDate
         willRenew = cachedState.willRenew
         managementURL = cachedState.managementURLString.flatMap(URL.init(string:))
-        bootstrapState = cachedState.hasProAccess ? .ready : .idle
+        bootstrapState = .ready
     }
 
     func persistCachedState() {

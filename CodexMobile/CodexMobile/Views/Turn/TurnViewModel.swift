@@ -953,11 +953,6 @@ final class TurnViewModel {
             return
         }
 
-        if let subscriptions, !subscriptions.hasAppAccess {
-            codex.lastErrorMessage = "Your 5 free messages are over. Unlock Remodex Pro to keep chatting."
-            return
-        }
-
         let queuedDraft = reviewSelection == nil ? QueuedTurnDraft(
             id: UUID().uuidString,
             text: payload,
