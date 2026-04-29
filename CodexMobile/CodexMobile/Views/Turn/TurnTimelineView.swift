@@ -551,7 +551,7 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
                 GeometryReader { viewport in
                     let contentWidth = timelineContentWidth(for: viewport.size.width)
                     ScrollView(.vertical) {
-                        VStack(spacing: 20) {
+                        LazyVStack(spacing: 20) {
                             TurnTimelineRowsSection(
                                 shouldWarmRecentTailProgressively: shouldWarmRecentTailProgressively,
                                 hasEarlierMessages: hasEarlierMessages,

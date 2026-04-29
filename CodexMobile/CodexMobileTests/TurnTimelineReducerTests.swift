@@ -1508,6 +1508,44 @@ final class TurnTimelineReducerTests: XCTestCase {
         XCTAssertNil(content)
     }
 
+    func testTimelineMarkdownSegmentsSplitLongProseAroundCodeFences() {
+        let source = """
+        Intro paragraph.
+
+        ```swift
+        let value = 1
+        ```
+
+        Outro paragraph.
+        """
+
+        let segments = TimelineMarkdownSegmenter.segments(in: source)
+
+        XCTAssertEqual(segments.map(\.kind), [.markdown, .codeBlock, .markdown])
+        XCTAssertEqual(segments[1].codeLanguage, "swift")
+        XCTAssertEqual(segments[1].text, "let value = 1")
+    }
+
+    func testTimelineMarkdownSegmentsKeepUnclosedFenceAsCodeBlock() {
+        let source = """
+        Intro
+
+        ```objective-c
+        @implementation Example
+        """
+
+        let segments = TimelineMarkdownSegmenter.segments(in: source)
+
+        XCTAssertEqual(segments.map(\.kind), [.markdown, .codeBlock])
+        XCTAssertEqual(segments[1].codeLanguage, "objective-c")
+        XCTAssertEqual(segments[1].text, "@implementation Example")
+    }
+
+    func testTimelineTextSelectionPolicyEnablesInlineSelectionOnlyInsideMessages() {
+        XCTAssertTrue(TimelineTextSelectionPolicy.allowsInlineMessageSelection)
+        XCTAssertFalse(TimelineTextSelectionPolicy.allowsScrollContainerSelection)
+    }
+
     func testMermaidSourceNormalizerConvertsLooseArrowLabels() {
         let source = """
         W -- Yes --> X[Relay replaces old Mac socket<br/>4001 to old connection]

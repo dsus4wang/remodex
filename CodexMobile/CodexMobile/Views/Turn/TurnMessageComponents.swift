@@ -10,9 +10,9 @@ import SwiftUI
 import Textual
 import UIKit
 
-// Keep Textual selection out of the scrolling timeline. This is shared by both
-// plain markdown rows and Mermaid-interleaved markdown segments.
-let enablesInlineMarkdownSelectionInTimeline = false
+// Keep selection scoped to individual message text views instead of the outer
+// scroll container. This is shared by plain markdown rows and Mermaid segments.
+let enablesInlineMarkdownSelectionInTimeline = TimelineTextSelectionPolicy.allowsInlineMessageSelection
 
 // Normalizes streaming placeholders once so assistant rows do not render transient status text
 // as if it were final message content.
@@ -98,6 +98,92 @@ private struct CachingMarkdownParser: MarkupParser {
     }
 }
 
+@MainActor
+private enum TimelineAttributedTextBuilder {
+    static func markdown(_ text: String, profile: MarkdownRenderProfile) -> NSAttributedString {
+        let transformed = MarkdownTextFormatter.renderableText(from: text, profile: profile)
+        let attributed = (try? CachingMarkdownParser.shared.attributedString(for: transformed))
+            ?? AttributedString(transformed)
+        return nsAttributedString(from: attributed, defaultFont: AppFont.uiFont(size: 15), defaultColor: .label)
+    }
+
+    static func plain(_ text: String, font: UIFont, color: UIColor = .label) -> NSAttributedString {
+        NSAttributedString(
+            string: text,
+            attributes: [
+                .font: font,
+                .foregroundColor: color,
+            ]
+        )
+    }
+
+    static func userBubble(_ attributed: AttributedString) -> NSAttributedString {
+        nsAttributedString(from: attributed, defaultFont: AppFont.uiFont(size: 15), defaultColor: .label)
+    }
+
+    private static func nsAttributedString(
+        from attributed: AttributedString,
+        defaultFont: UIFont,
+        defaultColor: UIColor
+    ) -> NSAttributedString {
+        let mutable = NSMutableAttributedString(attributedString: NSAttributedString(attributed))
+        let fullRange = NSRange(location: 0, length: mutable.length)
+        guard fullRange.length > 0 else {
+            return mutable
+        }
+
+        mutable.enumerateAttribute(.font, in: fullRange) { value, range, _ in
+            if value == nil {
+                mutable.addAttribute(.font, value: defaultFont, range: range)
+            }
+        }
+        mutable.enumerateAttribute(.foregroundColor, in: fullRange) { value, range, _ in
+            if value == nil {
+                mutable.addAttribute(.foregroundColor, value: defaultColor, range: range)
+            }
+        }
+
+        return mutable
+    }
+}
+
+private struct SelectableTimelineTextView: UIViewRepresentable {
+    let attributedText: NSAttributedString
+    var constrainsToAvailableWidth = false
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.backgroundColor = .clear
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isScrollEnabled = false
+        textView.adjustsFontForContentSizeCategory = true
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        textView.textContainer.widthTracksTextView = true
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textView.setContentHuggingPriority(.required, for: .vertical)
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        if !textView.attributedText.isEqual(to: attributedText) {
+            textView.attributedText = attributedText
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? uiView.bounds.width
+        guard width > 0 else {
+            return nil
+        }
+        let size = uiView.sizeThatFits(
+            CGSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        )
+        return CGSize(width: constrainsToAvailableWidth ? width : min(width, size.width), height: size.height)
+    }
+}
+
 struct MarkdownTextView: View {
     let text: String
     let profile: MarkdownRenderProfile
@@ -105,22 +191,22 @@ struct MarkdownTextView: View {
     var constrainsToAvailableWidth: Bool = false
 
     var body: some View {
-        let transformed = MarkdownTextFormatter.renderableText(from: text, profile: profile)
-        // Keep prose on the app font, but let Textual own markdown/code layout to avoid block sizing regressions.
-        // Force code-block overflow to wrap instead of scroll so horizontal ScrollViews
-        // inside the timeline do not compete with the sidebar swipe gesture or let
-        // the chat feel like a pannable canvas.
-        let baseView = StructuredText(transformed, parser: CachingMarkdownParser.shared)
-            .font(AppFont.body())
-            .textual.structuredTextStyle(.gitHub)
-            .textual.overflowMode(.wrap)
-
         let renderedContent = Group {
             if enablesSelection {
-                baseView
-                    .textual.textSelection(.enabled)
+                SelectableTimelineTextView(
+                    attributedText: TimelineAttributedTextBuilder.markdown(text, profile: profile),
+                    constrainsToAvailableWidth: constrainsToAvailableWidth
+                )
             } else {
-                baseView
+                let transformed = MarkdownTextFormatter.renderableText(from: text, profile: profile)
+                // Keep prose on the app font, but let Textual own markdown/code layout to avoid block sizing regressions.
+                // Force code-block overflow to wrap instead of scroll so horizontal ScrollViews
+                // inside the timeline do not compete with the sidebar swipe gesture or let
+                // the chat feel like a pannable canvas.
+                StructuredText(transformed, parser: CachingMarkdownParser.shared)
+                    .font(AppFont.body())
+                    .textual.structuredTextStyle(.gitHub)
+                    .textual.overflowMode(.wrap)
             }
         }
 
@@ -144,25 +230,30 @@ private struct StreamingAssistantMarkdownTextView: View {
 
     var body: some View {
         let effectiveText = displayedText.isEmpty ? text : displayedText
-        let rendered = Text(effectiveText)
-            .font(AppFont.body())
-            .foregroundStyle(.primary)
-            .fixedSize(horizontal: false, vertical: true)
-
-        let selectable = Group {
+        let rendered = Group {
             if enablesSelection {
-                rendered.textSelection(.enabled)
+                SelectableTimelineTextView(
+                    attributedText: TimelineAttributedTextBuilder.plain(
+                        effectiveText,
+                        font: AppFont.uiFont(size: 15),
+                        color: .label
+                    ),
+                    constrainsToAvailableWidth: constrainsToAvailableWidth
+                )
             } else {
-                rendered
+                Text(effectiveText)
+                    .font(AppFont.body())
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
 
         Group {
             if constrainsToAvailableWidth {
-                selectable
+                rendered
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                selectable
+                rendered
             }
         }
         .onAppear {
@@ -184,6 +275,82 @@ private struct StreamingAssistantMarkdownTextView: View {
         } else {
             displayedText = nextText
         }
+    }
+}
+
+private struct TimelineMarkdownSegmentsView: View {
+    let text: String
+    let profile: MarkdownRenderProfile
+    var enablesSelection = false
+    var constrainsToAvailableWidth = false
+
+    private var segments: [TimelineMarkdownSegment] {
+        TimelineMarkdownSegmenter.segments(in: text)
+    }
+
+    var body: some View {
+        let resolvedSegments = segments
+        if resolvedSegments.count <= 1,
+           resolvedSegments.first?.kind != .codeBlock {
+            MarkdownTextView(
+                text: text,
+                profile: profile,
+                enablesSelection: enablesSelection,
+                constrainsToAvailableWidth: constrainsToAvailableWidth
+            )
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(resolvedSegments) { segment in
+                    switch segment.kind {
+                    case .markdown:
+                        MarkdownTextView(
+                            text: segment.text,
+                            profile: profile,
+                            enablesSelection: enablesSelection,
+                            constrainsToAvailableWidth: constrainsToAvailableWidth
+                        )
+                    case .codeBlock:
+                        TimelineSelectableCodeBlock(segment: segment)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct TimelineSelectableCodeBlock: View {
+    let segment: TimelineMarkdownSegment
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let language = segment.codeLanguage, !language.isEmpty {
+                Text(language)
+                    .font(AppFont.mono(.caption))
+                    .foregroundStyle(.secondary)
+            }
+
+            SelectableTimelineTextView(
+                attributedText: TimelineAttributedTextBuilder.plain(
+                    segment.text,
+                    font: AppFont.monoUIFont(size: 13, textStyle: .callout),
+                    color: .label
+                ),
+                constrainsToAvailableWidth: true
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(.secondarySystemBackground).opacity(0.8))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
     }
 }
 
@@ -280,7 +447,6 @@ private struct CodeCommentFindingCard: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(priorityColor.opacity(0.28), lineWidth: 1)
         )
-        .textSelection(.enabled)
     }
 }
 
@@ -719,7 +885,6 @@ struct MessageRow: View, Equatable {
     var assistantRevertAction: ((CodexMessage) -> Void)? = nil
     var subagentOpenAction: ((CodexSubagentThreadPresentation) -> Void)? = nil
     @State private var previewImage: PreviewImagePayload?
-    @State private var selectableTextSheet: SelectableMessageTextSheetState?
     @State private var throttledAssistantDisplayText: String?
     @State private var pendingAssistantDisplayText: String?
     @State private var assistantDisplayUpdateTask: Task<Void, Never>?
@@ -772,9 +937,6 @@ struct MessageRow: View, Equatable {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .sheet(item: $selectableTextSheet) { sheet in
-            SelectableMessageTextSheet(state: sheet)
-        }
         .frame(maxWidth: .infinity, alignment: .leading)
         .clipped()
         .onAppear {
@@ -809,8 +971,7 @@ struct MessageRow: View, Equatable {
                         contentIdentity: message.id,
                         rawText: text
                     ) {
-                        userBubbleText(text)
-                            .font(AppFont.body())
+                        userBubbleSelectableText(text)
                     }
                         .padding(.vertical, 12)
                         .padding(.horizontal, 16)
@@ -822,26 +983,36 @@ struct MessageRow: View, Equatable {
                 }
 
                 if let statusText = deliveryStatusText {
-                    Text(statusText)
-                        .font(AppFont.caption2())
-                        .foregroundStyle(message.deliveryState == .failed ? .red : .secondary)
-                }
-            }
-            .contextMenu {
-                if message.role == .user, !text.isEmpty {
-                    Button {
-                        HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                        UIPasteboard.general.string = text
-                    } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
-                    }
-                }
-                if isRetryAvailable, message.role == .user, !text.isEmpty {
-                    Button {
-                        HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                        onRetryUserMessage(text)
-                    } label: {
-                        Label("Retry", systemImage: "arrow.clockwise")
+                    HStack(spacing: 6) {
+                        Text(statusText)
+                            .font(AppFont.caption2())
+                            .foregroundStyle(message.deliveryState == .failed ? .red : .secondary)
+
+                        if !text.isEmpty {
+                            Menu {
+                                Button {
+                                    HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                                    UIPasteboard.general.string = text
+                                } label: {
+                                    Label("Copy", systemImage: "doc.on.doc")
+                                }
+                                if isRetryAvailable {
+                                    Button {
+                                        HapticFeedback.shared.triggerImpactFeedback(style: .light)
+                                        onRetryUserMessage(text)
+                                    } label: {
+                                        Label("Retry", systemImage: "arrow.clockwise")
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                                    .font(AppFont.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 20, height: 20)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Message actions")
+                        }
                     }
                 }
             }
@@ -854,9 +1025,9 @@ struct MessageRow: View, Equatable {
         }
     }
 
-    // Renders inline @file and $skill mentions inside one AttributedString so large
-    // messages do not build an arbitrarily deep SwiftUI Text concatenation chain.
-    private func userBubbleText(_ rawText: String) -> Text {
+    // Renders inline @file and $skill mentions inside one attributed text view so large
+    // messages stay selectable without building a deep SwiftUI Text concatenation chain.
+    private func userBubbleSelectableText(_ rawText: String) -> some View {
         let normalizedRawText = SkillReferenceFormatter.replacingSkillReferences(
             in: rawText,
             style: .mentionToken
@@ -868,29 +1039,29 @@ struct MessageRow: View, Equatable {
                 .filter { !$0.isEmpty }
         )
 
-        guard normalizedRawText.contains("@") || normalizedRawText.contains("$") else {
-            return Text(normalizedRawText)
+        let attributed: AttributedString
+        if normalizedRawText.contains("@") || normalizedRawText.contains("$"),
+           let mentionRegex = TurnMessageRegexCache.userMentionToken {
+            let nsText = normalizedRawText as NSString
+            let fullRange = NSRange(location: 0, length: nsText.length)
+            let matches = mentionRegex.matches(in: normalizedRawText, range: fullRange)
+            attributed = matches.isEmpty
+                ? AttributedString(normalizedRawText)
+                : userBubbleAttributedText(
+                    from: normalizedRawText,
+                    matches: matches,
+                    nsText: nsText,
+                    confirmedFileMentions: confirmedFileMentions
+                )
+        } else {
+            attributed = AttributedString(normalizedRawText)
         }
 
-        guard let mentionRegex = TurnMessageRegexCache.userMentionToken else {
-            return Text(normalizedRawText)
-        }
-
-        let nsText = normalizedRawText as NSString
-        let fullRange = NSRange(location: 0, length: nsText.length)
-        let matches = mentionRegex.matches(in: normalizedRawText, range: fullRange)
-        guard !matches.isEmpty else {
-            return Text(normalizedRawText)
-        }
-
-        return Text(
-            userBubbleAttributedText(
-                from: normalizedRawText,
-                matches: matches,
-                nsText: nsText,
-                confirmedFileMentions: confirmedFileMentions
-            )
+        return SelectableTimelineTextView(
+            attributedText: TimelineAttributedTextBuilder.userBubble(attributed),
+            constrainsToAvailableWidth: false
         )
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func normalizedMentionToken(_ token: String) -> (token: String, trailingPunctuation: String) {
@@ -1051,7 +1222,7 @@ struct MessageRow: View, Equatable {
                     MermaidMarkdownContentView(content: mermaidContent)
                 } else if let inferredQuestionnaire {
                     if let introText = inferredQuestionnaire.introText {
-                        MarkdownTextView(
+                        TimelineMarkdownSegmentsView(
                             text: introText,
                             profile: .assistantProse,
                             enablesSelection: enablesInlineMarkdownSelectionInTimeline,
@@ -1073,7 +1244,7 @@ struct MessageRow: View, Equatable {
                 } else if let proposedPlan {
                     // Compatibility-mode proposed plans still render inline from assistant text.
                     if !renderedPlanText.isEmpty {
-                        MarkdownTextView(
+                        TimelineMarkdownSegmentsView(
                             text: renderedPlanText,
                             profile: .assistantProse,
                             enablesSelection: enablesInlineMarkdownSelectionInTimeline,
@@ -1094,7 +1265,7 @@ struct MessageRow: View, Equatable {
                         constrainsToAvailableWidth: true
                     )
                 } else {
-                    MarkdownTextView(
+                    TimelineMarkdownSegmentsView(
                         text: visibleAssistantText,
                         profile: .assistantProse,
                         enablesSelection: enablesInlineMarkdownSelectionInTimeline,
@@ -1119,9 +1290,6 @@ struct MessageRow: View, Equatable {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contextMenu {
-            selectableTextActions(text: text, usesMarkdownSelection: true)
-        }
     }
 
     @ViewBuilder
@@ -1181,9 +1349,14 @@ struct MessageRow: View, Equatable {
 
         return VStack(alignment: .leading, spacing: 4) {
             if !joined.isEmpty {
-                Text(joined)
-                    .font(AppFont.caption())
-                    .foregroundStyle(.secondary)
+                SelectableTimelineTextView(
+                    attributedText: TimelineAttributedTextBuilder.plain(
+                        joined,
+                        font: AppFont.uiFont(size: 11, textStyle: .caption),
+                        color: .secondaryLabel
+                    ),
+                    constrainsToAvailableWidth: true
+                )
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
@@ -1193,9 +1366,6 @@ struct MessageRow: View, Equatable {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
-        .contextMenu {
-            selectableTextActions(text: text, usesMarkdownSelection: false)
-        }
     }
 
     private func fileChangeSystemView(text: String, renderModel: MessageRowRenderModel) -> some View {
@@ -1227,20 +1397,19 @@ struct MessageRow: View, Equatable {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contextMenu {
-            selectableTextActions(text: text, usesMarkdownSelection: false)
-        }
     }
 
     private func defaultSystemView(text: String) -> some View {
-        Text(text)
-            .font(AppFont.footnote())
-            .foregroundStyle(.secondary)
+        SelectableTimelineTextView(
+            attributedText: TimelineAttributedTextBuilder.plain(
+                text,
+                font: AppFont.uiFont(size: 12, textStyle: .footnote),
+                color: .secondaryLabel
+            ),
+            constrainsToAvailableWidth: true
+        )
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 2)
-            .contextMenu {
-                selectableTextActions(text: text, usesMarkdownSelection: false)
-            }
     }
 
     @ViewBuilder
@@ -1416,30 +1585,6 @@ struct MessageRow: View, Equatable {
         .accessibilityHint(presentation.warningText ?? presentation.helperText ?? "")
     }
 
-    @ViewBuilder
-    private func selectableTextActions(text: String, usesMarkdownSelection: Bool) -> some View {
-        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedText.isEmpty {
-            Button {
-                HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                selectableTextSheet = SelectableMessageTextSheetState(
-                    role: message.role,
-                    text: trimmedText,
-                    usesMarkdownSelection: usesMarkdownSelection
-                )
-            } label: {
-                Label("Select Text", systemImage: "text.cursor")
-            }
-
-            Button {
-                HapticFeedback.shared.triggerImpactFeedback(style: .light)
-                UIPasteboard.general.string = trimmedText
-            } label: {
-                Label("Copy", systemImage: "doc.on.doc")
-            }
-        }
-    }
-
     // Throttles only the assistant row's visible text during streaming so markdown/layout
     // work stays local to that cell instead of firing on every token delta.
     private func synchronizeAssistantDisplayText(immediate: Bool) {
@@ -1478,61 +1623,6 @@ struct MessageRow: View, Equatable {
             throttledAssistantDisplayText = pendingAssistantDisplayText ?? nextText
             assistantDisplayUpdateTask = nil
         }
-    }
-}
-
-private struct SelectableMessageTextSheetState: Identifiable {
-    let id = UUID()
-    let role: CodexMessageRole
-    let text: String
-    let usesMarkdownSelection: Bool
-
-    var title: String {
-        switch role {
-        case .assistant:
-            return "Assistant Message"
-        case .system:
-            return "System Message"
-        case .user:
-            return "Message"
-        }
-    }
-}
-
-private struct SelectableMessageTextSheet: View {
-    let state: SelectableMessageTextSheetState
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if state.usesMarkdownSelection {
-                        MarkdownTextView(
-                            text: state.text,
-                            profile: .assistantProse,
-                            enablesSelection: true
-                        )
-                    } else {
-                        Text(state.text)
-                            .font(AppFont.body())
-                            .foregroundStyle(.primary)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .padding(16)
-            }
-            .navigationTitle(state.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .adaptiveNavigationBar()
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
     }
 }
 
@@ -1710,12 +1800,14 @@ private struct ThinkingDisclosureView: View {
     }
 
     private func detailText(_ value: String) -> some View {
-        Text(.init(value))
-            .font(AppFont.caption())
-            .lineSpacing(2)
-            .fontWeight(.regular)
-            .foregroundStyle(.secondary.opacity(0.85))
-            .textSelection(.enabled)
+        SelectableTimelineTextView(
+            attributedText: TimelineAttributedTextBuilder.plain(
+                value,
+                font: AppFont.uiFont(size: 11, textStyle: .caption),
+                color: .secondaryLabel
+            ),
+            constrainsToAvailableWidth: true
+        )
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
