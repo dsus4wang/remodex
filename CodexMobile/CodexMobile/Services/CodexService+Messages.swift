@@ -2716,6 +2716,15 @@ extension CodexService {
         }
 
         if let resolvedTurnId,
+           let explicitItemId,
+           let messageID = rebindMatchingStreamingAssistantCompletion(
+               threadId: threadId,
+               turnId: resolvedTurnId,
+               itemId: explicitItemId,
+               text: trimmedText
+           ) {
+            resolvedAssistantMessageId = messageID
+        } else if let resolvedTurnId,
            let messageID = ensureStreamingAssistantMessage(
                threadId: threadId,
                turnId: resolvedTurnId,
@@ -2799,6 +2808,63 @@ extension CodexService {
             )
         }
         updateCurrentOutput(for: threadId)
+    }
+
+    func rebindMatchingStreamingAssistantCompletion(
+        threadId: String,
+        turnId: String,
+        itemId: String,
+        text: String
+    ) -> String? {
+        guard var threadMessages = messagesByThread[threadId] else {
+            return nil
+        }
+
+        let normalizedIncoming = Self.normalizedMessageText(text)
+        guard !normalizedIncoming.isEmpty,
+              let targetIndex = threadMessages.indices.reversed().first(where: { index in
+                  let candidate = threadMessages[index]
+                  guard candidate.role == .assistant,
+                        candidate.turnId == turnId,
+                        normalizedStreamingItemID(candidate.itemId) != itemId else {
+                      return false
+                  }
+
+                  let normalizedCandidate = Self.normalizedMessageText(candidate.text)
+                  guard !normalizedCandidate.isEmpty else {
+                      return false
+                  }
+
+                  return normalizedCandidate == normalizedIncoming
+              }) else {
+            return nil
+        }
+
+        let messageID = threadMessages[targetIndex].id
+        let previousItemId = normalizedStreamingItemID(threadMessages[targetIndex].itemId)
+        threadMessages[targetIndex].text = text
+        threadMessages[targetIndex].itemId = itemId
+        threadMessages[targetIndex].isStreaming = false
+        messagesByThread[threadId] = threadMessages
+
+        let turnStreamingKey = streamingMessageKey(threadId: threadId, turnId: turnId)
+        streamingAssistantFallbackMessageByTurnID[turnStreamingKey] = messageID
+        if let previousItemId {
+            let previousItemKey = assistantStreamingMessageKey(
+                threadId: threadId,
+                turnId: turnId,
+                itemId: previousItemId
+            )
+            streamingAssistantMessageByItemKey[previousItemKey] = messageID
+        }
+        let itemStreamingKey = assistantStreamingMessageKey(
+            threadId: threadId,
+            turnId: turnId,
+            itemId: itemId
+        )
+        streamingAssistantMessageByItemKey[itemStreamingKey] = messageID
+        refreshDerivedPlanMetadata(threadId: threadId, messageIndex: targetIndex)
+        return messageID
     }
 
     func markMessageDeliveryState(

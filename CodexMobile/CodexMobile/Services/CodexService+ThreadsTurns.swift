@@ -1031,7 +1031,9 @@ extension CodexService {
 
         var includeStructuredSkillItems = supportsStructuredSkillInput && !skillMentions.isEmpty
         var imageURLKey = "url"
-        var effectiveCollaborationMode = supportsTurnCollaborationMode ? collaborationMode : nil
+        var effectiveCollaborationMode = shouldAttemptCollaborationMode(collaborationMode)
+            ? collaborationMode
+            : nil
         var didDowngradePlanModeForRuntime = false
         var includesServiceTier = runtimeServiceTierForTurn(threadId: threadId) != nil
 
@@ -1264,7 +1266,9 @@ extension CodexService {
 
         var includeStructuredSkillItems = supportsStructuredSkillInput && !skillMentions.isEmpty
         var imageURLKey = "url"
-        var effectiveCollaborationMode = supportsTurnCollaborationMode ? collaborationMode : nil
+        var effectiveCollaborationMode = shouldAttemptCollaborationMode(collaborationMode)
+            ? collaborationMode
+            : nil
         var currentExpectedTurnID = initialTurnID
         var didRetryWithRefreshedTurnID = false
 
@@ -1500,6 +1504,12 @@ extension CodexService {
             return nil
         }
 
+        if mode == .default {
+            return .object([
+                "mode": .string(mode.rawValue),
+            ])
+        }
+
         let resolvedModel = runtimeModelIdentifierForTurn()
             ?? selectedModelOption()?.model
             ?? availableModels.first?.model
@@ -1727,6 +1737,16 @@ extension CodexService {
         for collaborationMode: CodexCollaborationModeKind?
     ) -> Bool {
         collaborationMode == .plan && supportsTurnCollaborationMode
+    }
+
+    private func shouldAttemptCollaborationMode(
+        _ collaborationMode: CodexCollaborationModeKind?
+    ) -> Bool {
+        guard let collaborationMode else {
+            return false
+        }
+
+        return collaborationMode == .default || supportsTurnCollaborationMode
     }
 
     // Applies common failure bookkeeping for turn/start primary and fallback attempts.
