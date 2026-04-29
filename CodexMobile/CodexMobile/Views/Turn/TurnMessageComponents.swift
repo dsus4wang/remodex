@@ -1352,7 +1352,7 @@ struct MessageRow: View, Equatable {
                 SelectableTimelineTextView(
                     attributedText: TimelineAttributedTextBuilder.plain(
                         joined,
-                        font: AppFont.uiFont(size: 11, textStyle: .caption),
+                        font: AppFont.uiFont(size: 11, textStyle: .caption2),
                         color: .secondaryLabel
                     ),
                     constrainsToAvailableWidth: true
@@ -1803,7 +1803,7 @@ private struct ThinkingDisclosureView: View {
         SelectableTimelineTextView(
             attributedText: TimelineAttributedTextBuilder.plain(
                 value,
-                font: AppFont.uiFont(size: 11, textStyle: .caption),
+                font: AppFont.uiFont(size: 11, textStyle: .caption2),
                 color: .secondaryLabel
             ),
             constrainsToAvailableWidth: true
