@@ -511,6 +511,42 @@ final class CodexPlanModeTests: XCTestCase {
         XCTAssertNil(service.currentPlanSessionSource(for: threadID))
     }
 
+    func testImplementProposedPlanStartSendsDefaultBeforeModeProbeAndModelReload() async throws {
+        let suiteName = "CodexPlanModeTests.DefaultAfterRelaunch.\(UUID().uuidString)"
+        let firstService = makeService(suiteName: suiteName, reset: true)
+        let threadID = "thread-plan"
+        firstService.markNativePlanSession(for: threadID)
+
+        let service = makeService(suiteName: suiteName, reset: false)
+        XCTAssertFalse(service.supportsTurnCollaborationMode)
+        XCTAssertNil(service.selectedModelId)
+        XCTAssertTrue(service.availableModels.isEmpty)
+        XCTAssertNotNil(service.currentPlanSessionSource(for: threadID))
+
+        var capturedTurnStartParams: JSONValue?
+        service.requestTransportOverride = { method, params in
+            XCTAssertEqual(method, "turn/start")
+            capturedTurnStartParams = params
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object(["turnId": .string("turn-implement")]),
+                includeJSONRPC: false
+            )
+        }
+
+        try await service.implementProposedPlan(
+            threadId: threadID,
+            proposedPlan: CodexProposedPlan(body: "1. Ship it")
+        )
+
+        let collaborationMode = capturedTurnStartParams?
+            .objectValue?["collaborationMode"]?
+            .objectValue
+        XCTAssertEqual(collaborationMode?["mode"]?.stringValue, CodexCollaborationModeKind.default.rawValue)
+        XCTAssertNil(collaborationMode?["settings"])
+        XCTAssertNil(service.currentPlanSessionSource(for: threadID))
+    }
+
     func testRuntimeSupportsPlanCollaborationModeUsesOfficialCollaborationModeListShape() async {
         let service = makeService()
 

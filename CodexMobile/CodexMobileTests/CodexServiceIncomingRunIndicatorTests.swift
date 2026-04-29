@@ -920,6 +920,37 @@ final class CodexServiceIncomingRunIndicatorTests: XCTestCase {
         XCTAssertEqual(assistantMessages.map(\.text), ["First final", "Second current"])
     }
 
+    func testCompletionWithResolvedItemIdRebindsMatchingStreamingAssistantRow() {
+        let service = makeService()
+        let threadID = "thread-\(UUID().uuidString)"
+        let turnID = "turn-\(UUID().uuidString)"
+        let streamedItemID = "stream-\(UUID().uuidString)"
+        let completedItemID = "completed-\(UUID().uuidString)"
+        let finalText = "Intro\n\n- Keep line one\n- Keep line two"
+
+        service.appendAssistantDelta(
+            threadId: threadID,
+            turnId: turnID,
+            itemId: streamedItemID,
+            delta: finalText
+        )
+        service.flushPendingAssistantDeltas(for: threadID, turnId: turnID)
+        service.markTurnCompleted(threadId: threadID, turnId: turnID)
+
+        service.completeAssistantMessage(
+            threadId: threadID,
+            turnId: turnID,
+            itemId: completedItemID,
+            text: finalText
+        )
+
+        let assistantMessages = service.messages(for: threadID).filter { $0.role == .assistant }
+        XCTAssertEqual(assistantMessages.count, 1)
+        XCTAssertEqual(assistantMessages.first?.itemId, completedItemID)
+        XCTAssertEqual(assistantMessages.first?.text, finalText)
+        XCTAssertFalse(assistantMessages.first?.isStreaming ?? true)
+    }
+
     func testUnseenItemCompletionDoesNotStealTurnFallbackStream() {
         let service = makeService()
         let threadID = "thread-\(UUID().uuidString)"
